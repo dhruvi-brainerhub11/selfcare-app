@@ -1,4 +1,4 @@
-apiVersion: app/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: selfcare-frontend:latest
+        image: dhurvibrainerhub11/selfcare-frontend:latest
         ports:
         - containerPort: 80
           name: http
