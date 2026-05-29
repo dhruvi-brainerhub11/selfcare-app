@@ -1,0 +1,43 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Navigate to app directory or clone if not exists
+            if [ ! -d "selfcare-app" ]; then
+              git clone https://github.com/dhruvi-brainerhub11/selfcare-app.git
+              cd selfcare-app
+            else
+              cd selfcare-app
+              git pull origin main
+            fi
+            
+            # Create .env file for backend
+            cat > backend/.env <<EOF
+            PORT=5000
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            EOF
+            
+            # Build and deploy
+            docker-compose down
+            docker-compose up --build -d
+            
+            # Clean up old images
+            docker image prune -f
