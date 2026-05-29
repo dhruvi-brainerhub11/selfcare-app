@@ -28,10 +28,15 @@ jobs:
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             DB_NAME=${{ secrets.DB_NAME }}
             EOF
-            
-            # Build and deploy
+      
+      - name: Build and Deploy with Docker Compose
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd selfcare-app
             docker-compose down
             docker-compose up --build -d
-            
-            # Clean up old images
             docker image prune -f
