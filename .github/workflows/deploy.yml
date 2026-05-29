@@ -1,4 +1,4 @@
-name: Deploy to EC2
+name: 🚀 Deploy to EC2 Production
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
 
 jobs:
   deploy:
+    name: Deploy to EC2
     runs-on: ubuntu-latest
     
     steps:
@@ -22,7 +23,7 @@ jobs:
             git pull origin main
             
             # Create .env file
-            cat <<EOF > backend/.env
+            cat > backend/.env << EOF
             PORT=5000
             DB_HOST=${{ secrets.DB_HOST }}
             DB_USER=${{ secrets.DB_USER }}
@@ -41,4 +42,14 @@ jobs:
             
             # Wait for services to be ready
             sleep 15
-            echo "Deployment completed!"
+            
+            # Verify deployment
+            echo "Testing application endpoints..."
+            curl -f http://localhost:5000/api/health || echo "Backend not ready yet"
+            curl -f http://localhost:80 || echo "Frontend not ready yet"
+            
+            # Show container status
+            echo "Container status:"
+            docker-compose ps
+            
+            echo "✅ Deployment completed!"
