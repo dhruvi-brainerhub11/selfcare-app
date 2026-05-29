@@ -17,14 +17,8 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Navigate to app directory or clone if not exists
-            if [ ! -d "selfcare-app" ]; then
-              git clone https://github.com/dhruvi-brainerhub11/selfcare-app.git
-              cd selfcare-app
-            else
-              cd selfcare-app
-              git pull origin main
-            fi
+            cd selfcare-app
+            git pull origin main
             
             # Create .env file for backend
             cat > backend/.env <<EOF
