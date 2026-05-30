@@ -50,7 +50,10 @@ jobs:
             set -e
             
             echo "📦 Pulling latest code..."
-            cd selfcare-app
+            cd /mnt/efs/selfcare-app || cd selfcare-app
+            
+            # Fix git ownership
+            git config --global --add safe.directory /mnt/efs/selfcare-app || true
             git pull origin main
             
             echo "🔐 Creating environment file..."
@@ -61,11 +64,8 @@ jobs:
             DB_NAME=${{ secrets.DB_NAME }}
             EOF
             
-            echo "🏗️ Building new images..."
-            docker-compose build --no-cache
-            
-            echo "🔄 Rolling update (zero-downtime)..."
-            docker-compose up -d --force-recreate --remove-orphans
+            echo "🏗️ Building and starting (zero-downtime)..."
+            docker-compose up -d --build
             
             echo "⏳ Waiting for services to be ready..."
             sleep 20
