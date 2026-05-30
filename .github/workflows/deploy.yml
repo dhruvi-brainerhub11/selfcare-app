@@ -69,10 +69,8 @@ jobs:
             DB_NAME=${{ secrets.DB_NAME }}
             EOF
             
-            echo "🏗️ Building and starting (zero-downtime)..."
-            docker-compose down || true
-            docker-compose build
-            docker-compose up -d
+            echo "🏗️ Building and starting..."
+            docker-compose up -d --build
             
             echo "⏳ Waiting for services to be ready..."
             sleep 20
