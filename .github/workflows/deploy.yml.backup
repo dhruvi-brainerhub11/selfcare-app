@@ -1,0 +1,63 @@
+name: 🚀 Deploy to EC2 Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd selfcare-app
+            git pull origin main
+            
+            # Create .env file in root for docker-compose
+            cat > .env << EOF
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            EOF
+            
+            # Also create .env in backend directory
+            cat > backend/.env << EOF
+            PORT=5000
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            EOF
+            
+            # Clean up old Docker images
+            docker system prune -a -f
+            
+            # Stop and remove existing containers
+            docker-compose down || true
+            
+            # Build and start services
+            docker-compose up -d --build
+            
+            # Wait for services to be ready
+            sleep 15
+            
+            # Verify deployment
+            echo "Testing application endpoints..."
+            curl -f http://localhost:5000/api/health || echo "Backend not ready yet"
+            curl -f http://localhost:80 || echo "Frontend not ready yet"
+            
+            # Show container status
+            echo "Container status:"
+            docker-compose ps
+            
+            echo "✅ Deployment completed!"
