@@ -49,13 +49,16 @@ jobs:
           script: |
             set -e
             
-            echo "📦 Pulling latest code..."
+            echo "🔧 Fixing permissions..."
             cd /mnt/efs/selfcare-app || cd selfcare-app
             
-            # Fix git ownership and permissions
-            sudo chown -R ec2-user:ec2-user .git || true
-            git config --global --add safe.directory /mnt/efs/selfcare-app || true
+            # Fix all file permissions
+            sudo chown -R ec2-user:ec2-user . || true
+            sudo chmod -R u+w . || true
+            
+            echo "📦 Pulling latest code..."
             git config --global --add safe.directory $(pwd) || true
+            git reset --hard origin/main
             git pull origin main
             
             echo "🔐 Creating environment file..."
