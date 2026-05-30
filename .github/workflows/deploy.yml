@@ -1,28 +1,59 @@
-name: 🚀 Deploy to EC2 Production
+name: 🚀 Deploy to EC2 with Zero Downtime
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  deploy:
-    name: Deploy to EC2
+  # ==================== TEST ====================
+  test:
+    name: 🧪 Test Application
     runs-on: ubuntu-latest
     
     steps:
-      - name: Deploy to EC2
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Test Backend
+        run: |
+          cd backend
+          npm install
+          echo "✅ Backend dependencies installed"
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+          echo "✅ Frontend build successful"
+
+  # ==================== DEPLOY ====================
+  deploy:
+    name: 🚀 Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Deploy with zero-downtime
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
+            
+            echo "📦 Pulling latest code..."
             cd selfcare-app
             git pull origin main
             
-            # Create .env file in root for docker-compose
+            echo "🔐 Creating environment file..."
             cat > .env << EOF
             DB_HOST=${{ secrets.DB_HOST }}
             DB_USER=${{ secrets.DB_USER }}
@@ -30,34 +61,145 @@ jobs:
             DB_NAME=${{ secrets.DB_NAME }}
             EOF
             
-            # Also create .env in backend directory
-            cat > backend/.env << EOF
-            PORT=5000
-            DB_HOST=${{ secrets.DB_HOST }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            DB_NAME=${{ secrets.DB_NAME }}
-            EOF
+            echo "🏗️ Building new images..."
+            docker-compose build --no-cache
             
-            # Clean up old Docker images
-            docker system prune -a -f
+            echo "🔄 Rolling update (zero-downtime)..."
+            docker-compose up -d --force-recreate --remove-orphans
             
-            # Stop and remove existing containers
-            docker-compose down || true
+            echo "⏳ Waiting for services to be ready..."
+            sleep 20
             
-            # Build and start services
-            docker-compose up -d --build
+            # Health checks
+            echo "🏥 Running health checks..."
+            MAX_RETRIES=12
+            RETRY=0
             
-            # Wait for services to be ready
-            sleep 15
+            while [ $RETRY -lt $MAX_RETRIES ]; do
+              if curl -sf http://localhost:5000/api/health > /dev/null; then
+                echo "✅ Backend is healthy"
+                BACKEND_OK=1
+                break
+              fi
+              RETRY=$((RETRY + 1))
+              echo "⏳ Backend check $RETRY/$MAX_RETRIES..."
+              sleep 5
+            done
             
-            # Verify deployment
-            echo "Testing application endpoints..."
-            curl -f http://localhost:5000/api/health || echo "Backend not ready yet"
-            curl -f http://localhost:80 || echo "Frontend not ready yet"
+            if [ -z "$BACKEND_OK" ]; then
+              echo "❌ Backend health check failed!"
+              docker-compose logs --tail=50 backend
+              exit 1
+            fi
             
-            # Show container status
-            echo "Container status:"
+            if ! curl -sf http://localhost:80 > /dev/null; then
+              echo "❌ Frontend health check failed!"
+              docker-compose logs --tail=50 frontend
+              exit 1
+            fi
+            
+            echo "✅ Frontend is healthy"
+            
+            echo "🧹 Cleaning up..."
+            docker system prune -f
+            
+            echo "📊 Deployment Status:"
             docker-compose ps
             
-            echo "✅ Deployment completed!"
+            echo "✅ Deployment completed successfully!"
+
+      - name: Verify deployment
+        run: |
+          sleep 5
+          RESPONSE=$(curl -s http://${{ secrets.EC2_HOST }}/api/health)
+          echo "Health check response: $RESPONSE"
+          
+          if echo "$RESPONSE" | grep -q "Connected"; then
+            echo "✅ Deployment verified successfully!"
+          else
+            echo "❌ Deployment verification failed!"
+            exit 1
+          fi
+
+  # ==================== UPDATE AMI ====================
+  update-ami:
+    name: 📸 Update Auto Scaling AMI
+    runs-on: ubuntu-latest
+    needs: deploy
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Create and update AMI
+        run: |
+          INSTANCE_ID="i-0dafc8bece46a32ed"
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          
+          echo "📸 Creating new AMI..."
+          AMI_ID=$(aws ec2 create-image \
+            --instance-id $INSTANCE_ID \
+            --name "selfcare-app-$TIMESTAMP" \
+            --description "CI/CD Auto-generated - Commit: ${{ github.sha }}" \
+            --no-reboot \
+            --query 'ImageId' \
+            --output text)
+          
+          echo "✅ Created AMI: $AMI_ID"
+          
+          echo "⏳ Waiting for AMI to be available..."
+          aws ec2 wait image-available --image-ids $AMI_ID
+          
+          echo "🔄 Updating Launch Template..."
+          aws ec2 create-launch-template-version \
+            --launch-template-name selfcare-launch-template \
+            --source-version '$Latest' \
+            --launch-template-data "{\"ImageId\":\"$AMI_ID\"}"
+          
+          LATEST_VERSION=$(aws ec2 describe-launch-template-versions \
+            --launch-template-name selfcare-launch-template \
+            --query 'LaunchTemplateVersions[0].VersionNumber' \
+            --output text)
+          
+          aws ec2 modify-launch-template \
+            --launch-template-name selfcare-launch-template \
+            --default-version $LATEST_VERSION
+          
+          echo "✅ Auto Scaling will use new AMI: $AMI_ID"
+          
+          echo "🧹 Cleaning old AMIs (keeping last 3)..."
+          OLD_AMIS=$(aws ec2 describe-images \
+            --owners self \
+            --filters "Name=name,Values=selfcare-app-*" \
+            --query 'sort_by(Images, &CreationDate)[:-3].ImageId' \
+            --output text)
+          
+          for AMI in $OLD_AMIS; do
+            echo "Deleting old AMI: $AMI"
+            aws ec2 deregister-image --image-id $AMI || true
+          done
+
+  # ==================== NOTIFY ====================
+  notify:
+    name: 📢 Notify Status
+    runs-on: ubuntu-latest
+    needs: [deploy, update-ami]
+    if: always()
+    
+    steps:
+      - name: Deployment Summary
+        run: |
+          STATUS="${{ needs.deploy.result }}"
+          if [ "$STATUS" = "success" ]; then
+            echo "✅ Deployment successful!"
+            echo "Commit: ${{ github.sha }}"
+            echo "Author: ${{ github.actor }}"
+            echo "Message: ${{ github.event.head_commit.message }}"
+          else
+            echo "❌ Deployment failed!"
+            exit 1
+          fi
