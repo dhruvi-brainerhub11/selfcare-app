@@ -70,7 +70,9 @@ jobs:
             EOF
             
             echo "🏗️ Building and starting (zero-downtime)..."
-            docker-compose up -d --build
+            docker-compose down || true
+            docker-compose build
+            docker-compose up -d
             
             echo "⏳ Waiting for services to be ready..."
             sleep 20
