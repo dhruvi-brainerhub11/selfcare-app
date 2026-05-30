@@ -52,8 +52,10 @@ jobs:
             echo "📦 Pulling latest code..."
             cd /mnt/efs/selfcare-app || cd selfcare-app
             
-            # Fix git ownership
+            # Fix git ownership and permissions
+            sudo chown -R ec2-user:ec2-user .git || true
             git config --global --add safe.directory /mnt/efs/selfcare-app || true
+            git config --global --add safe.directory $(pwd) || true
             git pull origin main
             
             echo "🔐 Creating environment file..."
