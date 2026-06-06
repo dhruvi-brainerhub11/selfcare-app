@@ -44,16 +44,16 @@ jobs:
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
+          username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
             
             echo "🔧 Fixing permissions..."
-            cd /mnt/efs/selfcare-app || cd selfcare-app
+            cd /home/ubuntu/selfcare-app || cd selfcare-app
             
             # Fix all file permissions
-            sudo chown -R ec2-user:ec2-user . || true
+            sudo chown -R ubuntu:ubuntu . || true
             sudo chmod -R u+w . || true
             
             echo "📦 Pulling latest code..."
